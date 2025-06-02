@@ -5,8 +5,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Define paths for images and masks
-image_dir = '../data/images/'  # Path to your images
-mask_dir = '../data/masks/'    # Path to your segmentation masks
+script_dir = os.path.dirname(os.path.abspath(__file__))
+image_dir = os.path.join(script_dir, '..', 'data',
+                         'images')  # Path to your images
+# Path to your segmentation masks
+mask_dir = os.path.join(script_dir, '..', 'data', 'masks')
 
 # List files to verify
 image_files = os.listdir(image_dir)

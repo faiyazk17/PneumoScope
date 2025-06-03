@@ -1,21 +1,21 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter  # <-- import TensorBoard writer
+from torch.utils.tensorboard import SummaryWriter
 from .dataset import PneumoDataset
 from .unet_model import UNet
 import os
 from tqdm import tqdm
+import time  # <-- for timing epochs
 
 # Hyperparameters and config
 EPOCHS = 20
 BATCH_SIZE = 8
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 1e-4
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CHECKPOINT_DIR = "./checkpoints"
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print("Using device:", device)
+print("Using device:", DEVICE)
 
 
 def save_checkpoint(model, optimizer, epoch):
@@ -41,8 +41,16 @@ def train(resume_checkpoint=None):
         image_dir='data/images',
         mask_dir='data/masks',
         size=(256, 256))
+
     train_loader = DataLoader(
-        train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+        train_dataset,
+        batch_size=8,
+        shuffle=True,
+        num_workers=4,         # or 8 depending on your CPU
+        pin_memory=True,
+        prefetch_factor=4,
+        persistent_workers=True
+    )
 
     model = UNet(n_channels=3, n_classes=1).to(DEVICE)
     criterion = nn.BCEWithLogitsLoss()
@@ -52,10 +60,11 @@ def train(resume_checkpoint=None):
     if resume_checkpoint:
         start_epoch = load_checkpoint(model, optimizer, resume_checkpoint) + 1
 
-    # Initialize TensorBoard writer
     writer = SummaryWriter(log_dir="runs/pneumoscope_experiment")
 
     for epoch in range(start_epoch, EPOCHS + 1):
+        start_time = time.time()  # <-- Start timer
+
         model.train()
         running_loss = 0.0
         loop = tqdm(train_loader, desc=f"Epoch {epoch}/{EPOCHS}")
@@ -73,17 +82,21 @@ def train(resume_checkpoint=None):
             running_loss += loss.item()
             loop.set_postfix(loss=loss.item())
 
-            # Log loss per batch (optional)
-            global_step = (epoch - 1) * len(train_loader) + batch_idx
-            writer.add_scalar("Loss/train_batch", loss.item(), global_step)
+            # Log loss every 10 batches
+            if batch_idx % 10 == 0:
+                global_step = (epoch - 1) * len(train_loader) + batch_idx
+                writer.add_scalar("Loss/train_batch", loss.item(), global_step)
 
         avg_loss = running_loss / len(train_loader)
         print(f"Epoch {epoch} finished with avg loss: {avg_loss:.4f}")
-
-        # Log avg epoch loss
         writer.add_scalar("Loss/train_epoch", avg_loss, epoch)
 
         save_checkpoint(model, optimizer, epoch)
+
+        # Log epoch time
+        end_time = time.time()
+        epoch_duration = (end_time - start_time) / 60
+        print(f"Epoch {epoch} duration: {epoch_duration:.2f} minutes")
 
     writer.close()
 

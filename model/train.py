@@ -74,6 +74,13 @@ def train(resume_checkpoint=None):
         persistent_workers=True
     )
 
+    # Quick check: what % of masks in training set are completely empty?
+    empty_masks = 0
+    for _, mask in train_dataset:
+        if mask.sum() == 0:
+            empty_masks += 1
+    print(f"{empty_masks}/{len(train_dataset)} masks are completely empty ({(empty_masks / len(train_dataset)) * 100:.2f}%)")
+
     # Model, loss, optimizer, scaler
     model = UNet(n_channels=3, n_classes=1).to(DEVICE)
     criterion = DiceBCELoss()

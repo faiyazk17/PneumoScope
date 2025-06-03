@@ -36,6 +36,11 @@ class PneumoDataset(Dataset):
     def __init__(self, processed_dir):
         self.files = sorted(os.listdir(processed_dir))
         self.processed_dir = processed_dir
+        # Only keep image-mask pairs with non-empty masks
+        self.image_mask_pairs = [
+            pair for pair in self.image_mask_pairs
+            if torch.load(pair[1]).sum() > 0  # assumes masks are .pt tensors
+        ]
 
     def __len__(self):
         return len(self.files)

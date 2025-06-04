@@ -2,10 +2,12 @@ import os
 import time
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from torch.utils.tensorboard import SummaryWriter
 from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
+
+from model.balanced_sampler import BalancedSampler
 
 from .dataset import PneumoDataset
 from .unet_model import UNet
@@ -61,14 +63,40 @@ def load_checkpoint(model, optimizer, checkpoint_path):
     return checkpoint['epoch']
 
 
+def dice_coeff(inputs, targets, smooth=1.0):
+    inputs = torch.sigmoid(inputs)
+    inputs = (inputs > 0.5).float()
+    inputs = inputs.view(-1)
+    targets = targets.view(-1)
+    intersection = (inputs * targets).sum()
+    return (2. * intersection + smooth) / (inputs.sum() + targets.sum() + smooth)
+
+
 # ==== Training Function ====
 def train(resume_checkpoint=None):
     # Dataset & DataLoader
-    train_dataset = PneumoDataset(processed_dir='data/processed')
+    train_dataset = PneumoDataset(
+        processed_dir_img='data/processed_small/images',
+        processed_dir_mask='data/processed_small/masks'
+    )
+
+    # Calculate weights for balanced sampling
+    labels = []
+    for _, mask in train_dataset:
+        label = 1 if mask.sum() > 0 else 0  # 1 = positive case, 0 = empty mask
+        labels.append(label)
+
+    class_counts = [labels.count(0), labels.count(1)]
+    class_weights = [1.0 / c for c in class_counts]
+    sample_weights = [class_weights[label] for label in labels]
+    sampler = WeightedRandomSampler(
+        sample_weights, num_samples=len(sample_weights), replacement=True)
+    print(f"Found {len(train_dataset)} samples")
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=BATCH_SIZE,
-        shuffle=True,
+        sampler=sampler,
         num_workers=12,
         pin_memory=True,
         persistent_workers=True
@@ -100,6 +128,7 @@ def train(resume_checkpoint=None):
         start_time = time.time()
         model.train()
         running_loss = 0.0
+        running_dice = 0.0
         loop = tqdm(train_loader, desc=f"Epoch {epoch}/{EPOCHS}")
 
         for batch_idx, (images, masks) in enumerate(loop):
@@ -118,15 +147,22 @@ def train(resume_checkpoint=None):
             scaler.update()
 
             running_loss += float(loss)
-            loop.set_postfix(loss=float(loss))
+            batch_dice = dice_coeff(outputs, masks).item()
+            running_dice += batch_dice
+
+            loop.set_postfix(loss=float(loss), dice=batch_dice)
 
             if batch_idx % 10 == 0:
                 global_step = (epoch - 1) * len(train_loader) + batch_idx
                 writer.add_scalar("Loss/train_batch", float(loss), global_step)
+                writer.add_scalar("Dice/train_batch", batch_dice, global_step)
 
         avg_loss = running_loss / len(train_loader)
-        print(f"Epoch {epoch} finished with avg loss: {avg_loss:.4f}")
+        avg_dice = running_dice / len(train_loader)
+        print(
+            f"Epoch {epoch} finished with avg loss: {avg_loss:.4f}, avg dice: {avg_dice:.4f}")
         writer.add_scalar("Loss/train_epoch", avg_loss, epoch)
+        writer.add_scalar("Dice/train_epoch", avg_dice, epoch)
 
         save_checkpoint(model, optimizer, epoch)
 

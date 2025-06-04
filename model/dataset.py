@@ -6,44 +6,33 @@ from torch.utils.data import Dataset
 from scripts.preprocess import preprocess_image_and_mask
 
 
-class PneumoDataset(Dataset):
-    # def __init__(self, image_dir, mask_dir, size=(256, 256)):
-    #     self.image_dir = image_dir
-    #     self.mask_dir = mask_dir
-    #     self.size = size
+import os
+import torch
+from torch.utils.data import Dataset
 
-    #     self.image_files = sorted(os.listdir(image_dir))
-    #     self.mask_files = sorted(os.listdir(mask_dir))
 
-    # def __len__(self):
-    #     return len(self.image_files)
+class PneumoDataset(torch.utils.data.Dataset):
+    def __init__(self, processed_dir_img, processed_dir_mask):
+        self.processed_dir_img = processed_dir_img
+        self.processed_dir_mask = processed_dir_mask
+        self.files = sorted(os.listdir(self.processed_dir_img))
 
-    # def __getitem__(self, idx):
-    #     image_path = os.path.join(self.image_dir, self.image_files[idx])
-    #     mask_path = os.path.join(self.mask_dir, self.mask_files[idx])
-
-    #     image = cv2.imread(image_path)
-    #     mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-
-    #     image, mask = preprocess_image_and_mask(image, mask, self.size)
-
-    #     # Convert to PyTorch tensors and rearrange dimentions to CxHxW format (PyTorch format)
-    #     image = torch.tensor(image.transpose(2, 0, 1), dtype=torch.float32)
-    #     mask = torch.tensor(mask, dtype=torch.float32).unsqueeze(0)
-
-    #     return image, mask
-
-    def __init__(self, processed_dir):
-        self.files = sorted(os.listdir(processed_dir))
-        self.processed_dir = processed_dir
-        # Only keep image-mask pairs with non-empty masks
-        self.image_mask_pairs = [
-            pair for pair in self.image_mask_pairs
-            if torch.load(pair[1]).sum() > 0  # assumes masks are .pt tensors
-        ]
+        # Precompute mask labels: 1 if pneumothorax present, else 0
+        self.labels = []
+        for fname in self.files:
+            mask = torch.load(os.path.join(self.processed_dir_mask, fname))
+            # 1 if mask not empty else 0
+            self.labels.append(int(mask.sum() > 0))
 
     def __len__(self):
         return len(self.files)
 
     def __getitem__(self, idx):
-        return torch.load(os.path.join(self.processed_dir, self.files[idx]))
+        image = torch.load(os.path.join(
+            self.processed_dir_img, self.files[idx]))
+        mask = torch.load(os.path.join(
+            self.processed_dir_mask, self.files[idx]))
+        return image, mask
+
+    def get_labels(self):
+        return self.labels

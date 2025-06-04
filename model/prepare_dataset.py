@@ -6,7 +6,12 @@ from scripts.preprocess import preprocess_image_and_mask
 image_dir = "data/images"
 mask_dir = "data/masks"
 output_dir = "data/processed"
-os.makedirs(output_dir, exist_ok=True)
+
+# Create separate folders for processed images and masks
+processed_img_dir = os.path.join(output_dir, "images")
+processed_mask_dir = os.path.join(output_dir, "masks")
+os.makedirs(processed_img_dir, exist_ok=True)
+os.makedirs(processed_mask_dir, exist_ok=True)
 
 size = (256, 256)
 image_files = sorted(os.listdir(image_dir))
@@ -24,10 +29,12 @@ for fname in image_files:
     image = torch.tensor(image.transpose(2, 0, 1), dtype=torch.float32)
     mask = torch.tensor(mask, dtype=torch.float32).unsqueeze(0)
 
-    torch.save((image, mask), os.path.join(
-        output_dir, fname.replace("png", "pt")))
+    # Save processed images and masks separately but with same filename (just .pt)
+    torch.save(image, os.path.join(
+        processed_img_dir, fname.replace("png", "pt")))
+    torch.save(mask, os.path.join(
+        processed_mask_dir, fname.replace("png", "pt")))
 
-    print(f"Saved processed data for {fname} to {output_dir}")
-    print(f"Processed {fname} successfully.")
+    print(f"Saved processed image and mask for {fname}")
 
 print("Dataset preprocessing complete.")

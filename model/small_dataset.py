@@ -1,17 +1,27 @@
 import os
 import shutil
 
-# Source folder with all processed .pt files
-src_dir = 'data/processed'
-# Target folder with fewer samples
-dst_dir = 'data/processed_small'
-os.makedirs(dst_dir, exist_ok=True)
+src_img_dir = 'data/processed/images'
+src_mask_dir = 'data/processed/masks'
 
-# Number of samples to copy
-N = 100
+dst_img_dir = 'data/processed_small/images'
+dst_mask_dir = 'data/processed_small/masks'
 
-# Copy first N files
-for fname in sorted(os.listdir(src_dir))[:N]:
-    shutil.copy(os.path.join(src_dir, fname), os.path.join(dst_dir, fname))
+os.makedirs(dst_img_dir, exist_ok=True)
+os.makedirs(dst_mask_dir, exist_ok=True)
 
-print(f"Copied {N} samples to {dst_dir}")
+# Only get training files
+all_img_files = sorted([f for f in os.listdir(src_img_dir) if 'train' in f])
+copied = 0
+
+for fname in all_img_files:
+    if os.path.exists(os.path.join(src_mask_dir, fname)):
+        shutil.copy(os.path.join(src_img_dir, fname),
+                    os.path.join(dst_img_dir, fname))
+        shutil.copy(os.path.join(src_mask_dir, fname),
+                    os.path.join(dst_mask_dir, fname))
+        copied += 1
+    if copied >= 100:
+        break
+
+print(f"Copied {copied} training samples to smaller processed dataset.")

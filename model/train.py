@@ -27,21 +27,25 @@ print("Using device:", DEVICE)
 
 # ==== Custom Dice + BCE Loss ====
 class DiceBCELoss(nn.Module):
-    def __init__(self):
+    def __init__(self, bce_weight=0.5, dice_weight=0.5):
         super(DiceBCELoss, self).__init__()
         self.bce = nn.BCEWithLogitsLoss()
+        self.bce_weight = bce_weight
+        self.dice_weight = dice_weight
 
     def forward(self, inputs, targets):
         smooth = 1.0
-        inputs = torch.sigmoid(inputs)
-        inputs = inputs.view(-1)
-        targets = targets.view(-1)
+        inputs_sig = torch.sigmoid(inputs)
+        inputs_flat = inputs_sig.view(-1)
+        targets_flat = targets.view(-1)
 
-        intersection = (inputs * targets).sum()
+        intersection = (inputs_flat * targets_flat).sum()
         dice = (2. * intersection + smooth) / \
-            (inputs.sum() + targets.sum() + smooth)
+            (inputs_flat.sum() + targets_flat.sum() + smooth)
 
-        return 1 - dice + self.bce(inputs, targets)
+        bce_loss = self.bce(inputs, targets)
+        dice_loss = 1 - dice
+        return self.bce_weight * bce_loss + self.dice_weight * dice_loss
 
 
 # ==== Checkpoint Functions ====
@@ -76,8 +80,8 @@ def dice_coeff(inputs, targets, smooth=1.0):
 def train(resume_checkpoint=None):
     # Dataset & DataLoader
     train_dataset = PneumoDataset(
-        processed_dir_img='data/processed_small/images',
-        processed_dir_mask='data/processed_small/masks'
+        processed_dir_img='data/processed/images',
+        processed_dir_mask='data/processed/masks'
     )
 
     # Calculate weights for balanced sampling

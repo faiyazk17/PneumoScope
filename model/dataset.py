@@ -15,13 +15,15 @@ class PneumoDataset(torch.utils.data.Dataset):
     def __init__(self, processed_dir_img, processed_dir_mask):
         self.processed_dir_img = processed_dir_img
         self.processed_dir_mask = processed_dir_mask
-        self.files = sorted(os.listdir(self.processed_dir_img))
+
+        # Filter files to only those containing "train" in the filename
+        all_files = sorted(os.listdir(self.processed_dir_img))
+        self.files = [f for f in all_files if "train" in f]
 
         # Precompute mask labels: 1 if pneumothorax present, else 0
         self.labels = []
         for fname in self.files:
             mask = torch.load(os.path.join(self.processed_dir_mask, fname))
-            # 1 if mask not empty else 0
             self.labels.append(int(mask.sum() > 0))
 
     def __len__(self):

@@ -8,9 +8,12 @@ from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 
 from model.balanced_sampler import BalancedSampler
+from model.positive_sampler import PositiveOversampleSampler
 
 from .dataset import PneumoDataset
 from .unet_model import UNet
+
+from torch.utils.data import random_split
 
 torch.backends.cudnn.benchmark = True
 
@@ -76,6 +79,15 @@ def dice_coeff(inputs, targets, smooth=1.0):
     return (2. * intersection + smooth) / (inputs.sum() + targets.sum() + smooth)
 
 
+def load_best_model(model):
+    best_model_path = os.path.join(CHECKPOINT_DIR, "best_model.pth")
+    if os.path.exists(best_model_path):
+        model.load_state_dict(torch.load(best_model_path, map_location=DEVICE))
+        print(f"Best model loaded from {best_model_path}")
+    else:
+        print("Best model not found. Ensure training with early stopping was completed.")
+
+
 # ==== Training Function ====
 def train(resume_checkpoint=None):
     # Dataset & DataLoader
@@ -84,17 +96,28 @@ def train(resume_checkpoint=None):
         processed_dir_mask='data/processed/masks'
     )
 
-    # Calculate weights for balanced sampling
-    labels = []
-    for _, mask in train_dataset:
-        label = 1 if mask.sum() > 0 else 0  # 1 = positive case, 0 = empty mask
-        labels.append(label)
+    # Split: 90% train, 10% val
+    val_size = int(0.1 * len(train_dataset))
+    train_size = len(train_dataset) - val_size
+    train_dataset, val_dataset = random_split(
+        train_dataset, [train_size, val_size])
 
-    class_counts = [labels.count(0), labels.count(1)]
-    class_weights = [1.0 / c for c in class_counts]
-    sample_weights = [class_weights[label] for label in labels]
-    sampler = WeightedRandomSampler(
-        sample_weights, num_samples=len(sample_weights), replacement=True)
+    # Calculate weights for balanced sampling
+    # labels = []
+    # for _, mask in train_dataset:
+    #     label = 1 if mask.sum() > 0 else 0  # 1 = positive case, 0 = empty mask
+    #     labels.append(label)
+
+    # class_counts = [labels.count(0), labels.count(1)]
+    # class_weights = [1.0 / c for c in class_counts]
+    # sample_weights = [class_weights[label] for label in labels]
+    # sampler = WeightedRandomSampler(
+    #     sample_weights, num_samples=len(sample_weights), replacement=True)
+
+    labels = [train_dataset[i][1].sum().item(
+    ) > 0 for i in train_dataset.indices]
+    sampler = PositiveOversampleSampler(labels, num_samples=len(train_dataset))
+
     print(f"Found {len(train_dataset)} samples")
 
     train_loader = DataLoader(
@@ -104,6 +127,14 @@ def train(resume_checkpoint=None):
         num_workers=12,
         pin_memory=True,
         persistent_workers=True
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        num_workers=4,   # Fewer workers are fine here
+        pin_memory=True
     )
 
     # Quick check: what % of masks in training set are completely empty?
@@ -121,7 +152,13 @@ def train(resume_checkpoint=None):
 
     # Resume if needed
     start_epoch = 1
-    if resume_checkpoint:
+    best_val_dice = 0.0
+    patience = 5
+    epochs_without_improvement = 0
+
+    if resume_checkpoint == "best":
+        load_best_model(model)
+    elif resume_checkpoint:
         start_epoch = load_checkpoint(model, optimizer, resume_checkpoint) + 1
 
     # TensorBoard
@@ -172,6 +209,46 @@ def train(resume_checkpoint=None):
 
         epoch_duration = (time.time() - start_time) / 60
         print(f"Epoch {epoch} duration: {epoch_duration:.2f} minutes")
+
+        # === Validation ===
+        model.eval()
+        val_loss = 0.0
+        val_dice = 0.0
+
+        with torch.no_grad():
+            for images, masks in val_loader:
+                images = images.to(DEVICE, non_blocking=True)
+                masks = masks.to(DEVICE, non_blocking=True)
+
+                outputs = model(images)
+                loss = criterion(outputs, masks)
+                val_loss += float(loss)
+                val_dice += dice_coeff(outputs, masks).item()
+
+        avg_val_loss = val_loss / len(val_loader)
+        avg_val_dice = val_dice / len(val_loader)
+
+        print(
+            f"[Validation] Epoch {epoch} - Loss: {avg_val_loss:.4f}, Dice: {avg_val_dice:.4f}")
+        writer.add_scalar("Loss/val_epoch", avg_val_loss, epoch)
+        writer.add_scalar("Dice/val_epoch", avg_val_dice, epoch)
+
+        # Early stopping logic
+        if avg_val_dice > best_val_dice:
+            best_val_dice = avg_val_dice
+            epochs_without_improvement = 0
+            torch.save(model.state_dict(), os.path.join(
+                CHECKPOINT_DIR, "best_model.pth"))
+            print(f"New best model saved with Dice: {best_val_dice:.4f}")
+        else:
+            epochs_without_improvement += 1
+            print(
+                f"No improvement in validation Dice for {epochs_without_improvement} epoch(s)")
+
+        if epochs_without_improvement >= patience:
+            print(
+                f"Early stopping at epoch {epoch} due to no improvement in Dice.")
+            break
 
     writer.close()
 

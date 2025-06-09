@@ -1,72 +1,39 @@
-import torch
 import matplotlib.pyplot as plt
-from torch.utils.data import DataLoader
-from model.unet_model import UNet
-from model.dataset import PneumoDataset
-
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+import numpy as np
+import torch
 
 
-def dice_coeff(pred, target, smooth=1.0):
-    pred = pred.view(-1)
-    target = target.view(-1)
-    intersection = (pred * target).sum()
-    return (2. * intersection + smooth) / (pred.sum() + target.sum() + smooth)
-
-
-def visualize_predictions(model_path, dataset_path, num_samples=5):
-    # Load model
-    model = UNet(n_channels=3, n_classes=1).to(DEVICE)
-    checkpoint = torch.load(model_path, map_location=DEVICE)
-    model.load_state_dict(checkpoint['model_state_dict'])
+def visualize_predictions(model, dataloader, device, threshold=0.3, num_samples=5):
     model.eval()
-
-    dataset = PneumoDataset(processed_dir_img=f"{dataset_path}/images",
-                            processed_dir_mask=f"{dataset_path}/masks")
-    loader = DataLoader(dataset, batch_size=1, shuffle=True)
+    count = 0
 
     with torch.no_grad():
-        for i, (image, mask) in enumerate(loader):
-            if i >= num_samples:
-                break
+        for images, masks in dataloader:
+            images = images.to(device)
+            outputs = torch.sigmoid(model(images)).cpu().numpy()
+            images = images.cpu().numpy()
+            masks = masks.cpu().numpy()
 
-            image = image.to(DEVICE)
-            output = model(image)
-            pred = torch.sigmoid(output).cpu().squeeze().numpy()
-            pred_mask = (pred > 0.5).astype(float)
+            for i in range(images.shape[0]):
+                pred_mask = outputs[i, 0] > threshold
+                true_mask = masks[i, 0]
+                image = images[i].transpose(1, 2, 0)  # CxHxW to HxWxC
 
-            img_np = image.cpu().squeeze().permute(1, 2, 0).numpy()
-            true_mask = mask.cpu().squeeze().numpy()
+                plt.figure(figsize=(12, 4))
+                plt.subplot(1, 3, 1)
+                plt.imshow(image, cmap='gray')
+                plt.title('Image')
 
-            # Dice score for this sample
-            dice_score = dice_coeff(torch.tensor(
-                pred_mask), torch.tensor(true_mask))
+                plt.subplot(1, 3, 2)
+                plt.imshow(true_mask, cmap='gray')
+                plt.title('Ground Truth Mask')
 
-            # Plot
-            import matplotlib.pyplot as plt
-            fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-            axs[0].imshow(img_np, cmap='gray')
-            axs[0].set_title("Image")
-            axs[1].imshow(true_mask, cmap='gray')
-            axs[1].set_title("Ground Truth Mask")
-            axs[2].imshow(pred_mask, cmap='gray')
-            axs[2].set_title(f"Predicted Mask\nDice: {dice_score:.4f}")
+                plt.subplot(1, 3, 3)
+                plt.imshow(pred_mask, cmap='gray')
+                plt.title(f'Predicted Mask (th={threshold})')
 
-            for ax in axs:
-                ax.axis('off')
+                plt.show()
 
-            plt.show()
-
-
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model_path", required=True,
-                        help="Path to checkpoint .pth file")
-    parser.add_argument("--dataset_path", default="data/processed_small",
-                        help="Processed dataset directory")
-    parser.add_argument("--num_samples", type=int, default=5,
-                        help="Number of samples to visualize")
-    args = parser.parse_args()
-
-    visualize_predictions(args.model_path, args.dataset_path, args.num_samples)
+                count += 1
+                if count >= num_samples:
+                    return

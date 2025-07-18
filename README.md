@@ -97,18 +97,3 @@ PneumoScope/
 | Kubernetes | Scale model across clusters     |
 | Jenkins    | Automate CI/CD pipeline         |
 | AWS S3/EC2 | Host model + serve predictions  |
-
----
-
-## 📄 LinkedIn Description
-
-🚀 Built **PneumoScope**, an end-to-end AI pipeline for automatic **lung segmentation** from chest X-rays using a **U-Net architecture** in **PyTorch**. Trained on 12,000+ annotated images with live loss visualization via **TensorBoard**.
-
-🔧 Key features:
-
-* Custom PyTorch dataset loader
-* U-Net model with skip connections
-* Model checkpointing/resume support
-* TensorBoard logging for loss tracking
-
-🛠️ Tools: `PyTorch`, `TensorBoard`, `Python`, `OpenCV`, `Docker` (planned), `Kubernetes` (planned), `Jenkins` (planned), `AWS EC2/S3` (planned)
